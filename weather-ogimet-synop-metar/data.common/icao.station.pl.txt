@@ -1,0 +1,17 @@
+EPBY (BZG) – Bydgoszcz Ignacy Jan Paderewski Airport – Bydgoszcz
+EPGD (GDN) – Gdańsk Lech Wałęsa Airport – Gdańsk
+EPKK (KRK) – John Paul II International Airport Kraków-Balice – Kraków
+EPKT (KTW) – International Airport Katowice in Pyrzowice – Katowice
+EPLL (LCJ) – Łódź Władysław Reymont Airport (formerly Łódź-Lublinek Airport) – Łódź
+EPLB (LUZ) – Lublin Airport – Lublin
+EPMO (WMI) – Modlin Airport – Nowy Dwór Mazowiecki
+EPOK (QYD) – Gdynia-Babie Doły Airport – Gdynia
+EPPO (POZ) – Poznań-Ławica Airport – Poznań
+EPRZ (RZE) – Rzeszów-Jasionka Airport – Rzeszów
+EPSC (SZZ) – Szczecin-Goleniów "Solidarność" Airport – Szczecin
+EPSY (SZY) – Szczytno-Szymany International Airport – Szczytno
+EPWA (WAW) – Warsaw Frederic Chopin Airport (formerly Okecie International Airport) – Warsaw
+EPWR (WRO) – Copernicus Airport Wrocław – Wrocław
+EPZG (IEG) – Zielona Góra-Babimost Airport – Zielona Góra
+EPTO – Toruń Airport
+

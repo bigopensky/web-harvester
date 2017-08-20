@@ -1,0 +1,21 @@
+EKAH (AAR) – Aarhus Airport – Tirstrup near Aarhus
+EKBI (BLL) – Billund Airport – Billund
+EKCH (CPH) – Copenhagen Airport – Kastrup near Copenhagen
+EKEB (EBJ) – Esbjerg Airport – Esbjerg
+EKHG – Herning Airport – Herning
+EKKA (KRP) – Karup Airport – Karup
+EKLV – Lemvig Airport – Lemvig
+EKMB (MRW) – Lolland Airport – Maribo
+EKOD (ODE) – Odense Airport – Odense
+EKRD – Randers Airport – Randers
+EKRK (RKE) – Roskilde Airport – Tune near Roskilde
+EKRN (RNN) – Bornholm Airport – Rønne
+EKSB (SGD) – Sønderborg Airport – Sønderborg
+EKSN (KSN) – Sindal Airport – Sindal
+EKSP (SKS) – Skrydstrup Airport – Vojens
+EKSV (SQW) – Skive Airport –Skive
+EKTS (TED) – Thisted Airport – Thisted
+EKVH – Vesthimmerland Airport – Aars
+EKVJ (STA) – Stauning Vestjylland Airport – Skjern
+EKYT (AAL) – Aalborg Airport – Aalborg
+EKVD (VDP) – Vamdrup Airport – Kolding
