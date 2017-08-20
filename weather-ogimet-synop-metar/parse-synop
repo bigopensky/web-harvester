@@ -1,0 +1,886 @@
+#!/usr/bin/perl
+# ----------------------------------------------------------------------
+# Wetterparser fuer SYNOP-Daten von OGIMET.COM und deren Auswertung durch 
+# das Tool meta2fxml. zum Aufbau und Pflege der IFAOE-Wetterdatenbank
+# (c) 2012/2013 IFAOE.DE durch A.Weidauer 
+# ----------------------------------------------------------------------
+# Kontakt weidauer@ifaoe.de oder alex.weidauer@huckfinn.de
+# ----------------------------------------------------------------------
+use lib '.';
+
+use Switch;
+use metaf2xml::parser;
+use Data::Dumper;
+use List::Util qw(sum min max);
+
+# ======================================================================
+# Standardkonfigurationen 
+# ======================================================================
+$TOOL    = "parse-synop"; 
+$VERSION = "(c) - XII/2012 IFAOE.DE VERSION 1.0"; 
+$DEBUG   = 0;  $COMMENT="-- "; 
+$FORMAT  = "PGSQL"; 
+$TABLE   = "SYNOP_MSG";
+$STOP    = 0;    
+
+# ======================================================================
+# Aufrufkonventionen
+# ======================================================================
+$NUM_ARGS = @ARGV;
+
+# Hilfe
+die 
+ "\nProgramm: $TOOL SYNOP-FILE FORMAT [DB.TABLE]\n\n".
+ "Aufgabe: Erstellt eine SQL Datei aus einer METAR Datei ".
+ "und gibt das Ergebnis auf der Konsole aus.\n\n".
+ "Parameter:\n\n".
+ "  SYNOP-CSV - SYNOP-Datei mit Notation: \n".
+ "   EDAC,2005,01,01,10,20,METAR EDAC 011020Z ...=\n".
+ "   EDAC,2005,01,01,10,50,METAR EDAC 011050Z ...=\n".
+ "   ...\n\n".
+ "  FORMAT - Ausgabeformat TEXT.FULL|TEXT.ATTR|PGSQL".
+ "   DEBUG  - Volles Ausgabeformat Text Parser+Ergebnis\n".
+ "   TEXT   - Ausgabeformat Text Ergebnis attributiert\n".
+ "   PGSQL  - Ausgabeformat PostgreSQL\n\n".
+ " [DB.TABLE|STOP] - Name der Datenbanktabelle oder Stoppen nach N ".
+ "   Iterationen fuer die Modi DEBUG und TEXT \n\n"
+ if $NUM_ARGS < 2;
+
+# Parameter Eingabedatei setzen
+$FILE_NAME = $ARGV[0];
+die "ERROR:$TOOL> Unbekannte METAR-Datei:\n$FILE_NAME!\n" 
+if ! -f $FILE_NAME;
+
+# Parameter fuer das Format und ggf. Tabellenname setzten
+$FORMAT = $ARGV[1]; 
+
+switch ($FORMAT) {
+	 case "DEBUG" { $COMMENT = "# ";  $DEBUG = 2;
+	     $STOP = $ARGV[2] if defined($ARGV[2]);
+	 }
+	 case "TEXT"  { $COMMENT = "# ";  $DEBUG = 1; 
+	     $STOP = $ARGV[2] if defined($ARGV[2]);
+	 }
+	 case "PGSQL" { $COMMENT = "-- "; $DEBUG = 0;
+	   $TABLE = $ARGV[2] if defined($ARGV[2]);
+	 }
+	 else { die "Unbekanntes Ausgabeformat $FORMAT \n"; }
+}	
+
+# ======================================================================
+# KONFIGURATION
+# ======================================================================
+# NACHRICHTENTYP 
+$TYPE="SYNOP"; 
+$NUM_SECTION_3 = 70;
+
+# ITERATIONSTIEFE FUER WOLKEN UND WETTER Korrespondiert mit DB Feldern
+$NUM_ITER=5;
+
+# DATENLAYER AN/AUS
+$PARSE_ERROR        = 1;
+$PARSE_LOCATION     = 1;
+$PARSE_TIME         = 1;
+$PARSE_VISIBILITY   = 1;
+$PARSE_CLOUDS       = 1;
+$PARSE_PRESSURE     = 1;
+$PARSE_PRECIP       = 1;
+$PARSE_WEATHER      = 1;
+$PARSE_TEMPERATURE  = 1;
+$PARSE_WIND         = 1;
+
+# WINDRICHTUNGEN 16 teiliger  Kompass 
+@COMP_16 = qw ( N NNO NO ONO O OSO SO SSO S SSW SW WSW W WNW NW NNW N );
+
+$DLINE ="=============================================================";
+$SLINE ="-------------------------------------------------------------";
+
+# STANDARDISIERTE EINHEITEN
+$UNIT_MPS="\'m/s\'";   $UNIT_SEC="\'s\'";  $UNIT_GRD="\'Grad\'";
+$UNIT_PRES="\'hPa\'";  $UNIT_DIST="\'m\'"; $UNIT_PERC="\'%\'";
+$UNIT_GRDC="\'C\'";
+
+# DATENBANKFELDER 
+%DESC = (
+  cld_level       => "Anzahl der Wolkenlevel",    
+	cld_bs_dgh_0	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_0	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_0	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_0	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_0	=> "Bedeckungsgrad der Schicht - Interpretation",
+
+	cld_bs_dgh_1	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_1	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_1	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_1	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_1	=> "Bedeckungsgrad der Schicht - Interpretation",
+
+	cld_bs_dgh_2	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_2	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_2	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_2	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_2	=> "Bedeckungsgrad der Schicht - Interpretation",
+
+	cld_bs_dgh_3	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_3	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_3	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_3	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_3	=> "Bedeckungsgrad der Schicht - Interpretation",
+
+	cld_bs_dgh_4	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_4	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_4	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_4	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_4	=> "Bedeckungsgrad der Schicht - Interpretation",
+	
+	cld_bs_dgh_5	=> "untere Wolkenhoehe der Schicht - Messfehler",
+	cld_bs_val_5	=> "untere Wolkenhoehe der Schicht - Messwert",
+	cld_ds_val_5	=> "Bedeckungsgrad der Schicht - Messwert",
+	cld_ds_key_5	=> "Bedeckungsgrad der Schicht - Schluessel",
+	cld_ds_unt_5	=> "Bedeckungsgrad der Schicht - Interpretation",
+
+	cld_levels   	=> "Anzahl der Schichten",
+	cld_bs_min	=> "untere Wolkenhoehe - oberstes Level",
+	cld_bs_max	=> "untere Wolkenhoehe - niedrigstes Level",
+	cld_bs_unt	=> "untere Wolkenhoehe - Einheit",
+	cld_ds_sum	=> "Bedeckungsgrad - Summe aller Schichten",
+	cld_ds_avg	=> "Bedeckungsgrad - Mittel aller Schichten",
+	cld_bs_dgh_max	=> "untere Wolkenhoehe der Schicht - max. Messfehler",
+	
+	obs_ptc	        => "Name Wetterprotokoll",
+	obs_site	    => "Beobachtungsort",
+	obs_time	    => "Beobachtungszeit",
+	obs_msg	        => "Meldungstyp",
+	
+	pcp_samples     => "Anzahl Niederschlagsmessungen",
+	pcp_am0_val     => "Niederschlagsmenge - Messwert",
+	pcp_am0_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb0_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb0_unt     => "Niederschlagsmenge - Dauer Einheit",
+
+	pcp_am1_val     => "Niederschlagsmenge - Messwert",
+	pcp_am1_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb1_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb1_unt     => "Niederschlagsmenge - Dauer Einheit",
+	
+	pcp_am2_val     => "Niederschlagsmenge - Messwert",
+	pcp_am2_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb2_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb2_unt     => "Niederschlagsmenge - Dauer Einheit",
+	
+	pcp_am3_val     => "Niederschlagsmenge - Messwert",
+	pcp_am3_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb3_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb3_unt     => "Niederschlagsmenge - Dauer Einheit",
+	
+	pcp_am4_val     => "Niederschlagsmenge - Messwert",
+	pcp_am4_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb4_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb4_unt     => "Niederschlagsmenge - Dauer Einheit",
+	
+	pcp_am5_val     => "Niederschlagsmenge - Messwert",
+	pcp_am5_unt     => "Niederschlagsmenge - Einheit",
+	pcp_tb5_val     => "Niederschlagsmenge - Dauer",
+	pcp_tb5_unt     => "Niederschlagsmenge - Dauer Einheit",
+	
+	wth_tbf_val	    => "Wettererscheinung - Zeitraum davor - Messwert",
+	wth_tbf_unt	    => "Wettererscheinung - Zeitraum davor - Einheit",
+	wth_now_key	    => "Wettererscheinung jetzt - Kode",
+	wth_now_dsc	    => "Wettererscheinung jetzt - Klartext",
+	wth_bef0_dsc	=> "Wettererscheinung davor - Klartext",
+	wth_bef0_key	=> "Wettererscheinung davor - Kode",
+	wth_bef1_dsc	=> "weitere Wettererscheinung davor - Klartext",
+	wth_bef1_key	=> "weitere Wettererscheinung davor - Kode",
+	
+	slp_p_unt       => "Luftdruck Meereshoehe - Einheit",
+	slp_p_val       => "Luftdruck Meereshoehe - Messgroesse",
+	
+	sfc_at_unt	    => "Lufttemperatur - Einheit",
+	sfc_at_val	=>  "Lufttemperatur - Messwert",
+	sfc_dp_unt	=>  "Taupunkt - Einheit",
+	sfc_dp_val	=>  "Taupunkt - Messwert",
+	sfc_p_unt	=>  "Luftdruck Stationsniveau - Einheit",
+	sfc_p_val	=>  "Luftdruck Stationsniveau - Messwert",
+	sfc_rh_unt	=>  "relative Luftfeuchte - Einheit",
+	sfc_rh_val	=>  "relative Luftfeuchte - Messwert",
+	sfc_wd_dneg	=>  "Windrichtung - Abweichung neativ",
+	sfc_wd_dpos	=>  "Windrichtung - Abweichung positiv",
+	sfc_wd_from	=>  "Windrichtung - Ansprache aus",
+	sfc_wd_unt	=>  "Windrichtung - Einheit",
+	sfc_wd_val	=>  "Windrichtung - Wert",
+	sfc_ws_unt	=>  "Windmessungsintervall - Einheit",
+	sfc_ws_val	=>  "Windmessungsintervall - Messwert",
+	sfc_wv_unt	=>  "Windgeschwindigkeit - Einheit",
+	sfc_wv_val	=>  "Windgeschwindigkeit - Messwert",
+	
+	pv_vs_ddist	=>  "Sicht - Messfehler",
+	pv_vs_unt	=>  "Sicht - Einheit",
+	pv_vs_untx	=>  "Sichtmodifikator - Schluessel",
+	pv_vs_val	=>   "Sicht - Messwert",
+	pv_vs_valx	=>  "Sichtmodifikator - Text"
+);
+
+# ----------------------------------------------------------------------
+# - weatherPresent keys
+%WSYNOP = (
+  "00" => "Bewölkungsänderung in vergang. Stunde nicht beobachtet",
+  "01" => "Bewölkung in vergang. Stunde insgesamt abnehmend",
+  "02" => "Bewölkung in vergang. Stunde insgesamt unverändert",
+  "03" => "Bewölkung in vergang. Stunde insgesamt zunehmend",
+  "04" => "Sicht durch Rauch oder Vulkanasche vermindert",
+  "05" => "trockener Dunst",
+  "06" => "Staubtrübung, nicht durch Wind entstanden",
+  "07" => "Staub- oder Sandtrübung, durch Wind entstanden; oder Gischt",
+  "08" => "gut entwickelte Staub- oder Sandwirbel",
+  "09" => "Staub- oder Sandsturm in Sicht zur Beobachtungszeit, oder an der Station in vergang. Stunde",
+  "10" => "feuchter Dunst",
+  "11" => "(gefrierender) Bodennebel, in Schwaden",
+  "12" => "(gefrierender) Bodennebel",
+  "13" => "Wetterleuchten",
+  "14" => "Fallstreifen",
+  "15" => "Niederschlag in der Umgebung, mehr als 5 km entfernt",
+  "16" => "Niederschlag in der Umgebung, weniger als 5 km entfernt",
+  "17" => "Gewitter, aber zum Beobachtungszeitpunkt ohne Niederschlag",
+  "18" => "Sturmböen",
+  "19" => "Trichterwolke(n) oder Wasserhose(n)",
+  "20" => "Sprühregen oder Schneegriesel in vergang. Stunde",
+  "21" => "Regen in vergang. Stunde",
+  "22" => "Schneefall in vergang. Stunde",
+  "23" => "Schneeregen oder Fall von Eiskörnern in vergang. Stunde",
+  "24" => "Sprühregen oder Regen mit Glatteisbildung in vergang. Stunde",
+  "25" => "Regenschauer in vergang. Stunde",
+  "26" => "Schnee- oder Schneeregenschauer in vergang. Stunde",
+  "27" => "Hagel- oder Graupelschauer in vergang. Stunde",
+  "28" => "(gefrierender) Nebel in vergang. Stunde",
+  "29" => "Gewitter in vergang. Stunde",
+  "30" => "leichter oder mäßiger Staub- oder Sandsturm, in vergang. Stunde abgenommen",
+  "31" => "leichter oder mäßiger Staub- oder Sandsturm, in vergang. Stunde unverändert",
+  "32" => "leichter oder mäßiger Staub- oder Sandsturm, in vergang. Stunde begonnen oder zugenommen",
+  "33" => "starker Staub- oder Sandsturm, in vergang. Stunde abgenommen",
+  "34" => "starker Staub- oder Sandsturm, in vergang. Stunde unverändert",
+  "35" => "starker Staub- oder Sandsturm, in vergang. Stunde begonnen oder zugenommen",
+  "36" => "leichtes oder mäßiges Schneefegen, unter Augenhöhe",
+  "37" => "starkes Schneefegen, unter Augenhöhe",
+  "38" => "leichtes oder mäßiges Schneetreiben, über Augenhöhe",
+  "39" => "starkes Schneetreiben, über Augenhöhe",
+  "40" => "(gefrierender) Nebel in einiger Entfernung, Obergrenze oberhalb des Beobachters",
+  "41" => "Schwaden von (gefrierendem) Nebel",
+  "42" => "(gefrierender) Nebel, in vergang. Stunde dünner geworden, Himmel erkennbar",
+  "43" => "(gefrierender) Nebel, in vergang. Stunde dünner geworden, Himmel nicht erkennbar",
+  "44" => "(gefrierender) Nebel, in vergang. Stunde unverändert, Himmel erkennbar",
+  "45" => "(gefrierender) Nebel, in vergang. Stunde unverändert, Himmel nicht erkennbar",
+  "46" => "(gefrierender) Nebel, in vergang. Stunde dichter geworden, Himmel erkennbar",
+  "47" => "(gefrierender) Nebel, in vergang. Stunde dichter geworden, Himmel nicht erkennbar",
+  "48" => "Nebel mit Reifansatz, Himmel erkennbar",
+  "49" => "Nebel mit Reifansatz, Himmel nicht erkennbar",
+  "50" => "zeitweise leichter Sprühregen",
+  "51" => "leichter Sprühregen",
+  "52" => "zeitweise mäßiger Sprühregen",
+  "53" => "mäßiger Sprühregen",
+  "54" => "zeitweise starker Sprühregen",
+  "55" => "starker Sprühregen",
+  "56" => "leichter Sprühregen mit Glatteisbildung",
+  "57" => "mäßiger oder starker Sprühregen mit Glatteisbildung",
+  "58" => "leichter Sprühregen mit Regen",
+  "59" => "mäßiger oder starker Sprühregen mit Regen",
+  "60" => "zeitweise leichter Regen",
+  "61" => "leichter Regen",
+  "62" => "zeitweise mäßiger Regen",
+  "63" => "mäßiger Regen",
+  "64" => "zeitweise starker Regen",
+  "65" => "starker Regen",
+  "66" => "leichter Regen mit Glatteisbildung",
+  "67" => "mäßiger oder starker Regen mit Glatteisbildung",
+  "68" => "leichter Schneeregen",
+  "69" => "mäßiger oder starker Schneeregen",
+  "70" => "zeitweise leichter Schneefall",
+  "71" => "leichter Schneefall",
+  "72" => "zeitweise mäßiger Schneefall",
+  "73" => "mäßiger Schneefall",
+  "74" => "zeitweise starker Schneefall",
+  "75" => "starker Schneefall",
+  "76" => "Eisnadeln (Polarschnee)",
+  "77" => "Schneegriesel",
+  "78" => "Schneekristalle",
+  "79" => "Eiskörner (Eisregen)",
+  "80" => "leichte(r) Regenschauer",
+  "81" => "mäßige(r) oder starke(r) Regenschauer",
+  "82" => "äußerst heftige(r) Regenschauer",
+  "83" => "leichte(r) Schneeregenschauer",
+  "84" => "mäßige(r) oder starke(r) Schneeregenschauer",
+  "85" => "leichte(r) Schneeschauer",
+  "86" => "mäßige(r) oder starke(r) Schneeschauer",
+  "87" => "leichte(r) Graupelschauer",
+  "88" => "mäßige(r) oder starke(r) Graupelschauer",
+  "89" => "leichte(r) Hagelschauer",
+  "90" => "mäßige(r) oder starke(r) Hagelschauer",
+  "91" => "Gewitter in vergang. Stunde, jetzt leichter Regen",
+  "92" => "Gewitter in vergang. Stunde, jetzt mäßiger oder starker Regen",
+  "93" => "Gewitter in vergang. Stunde, jetzt leichter Schneefall oder Schneeregen oder Hagel oder Graupel",
+  "94" => "Gewitter in vergang. Stunde, jetzt mäßiger oder starker Schneefall oder Schneeregen oder Hagel oder Graupel",
+  "95" => "leichtes oder mäßiges Gewitter mit Regen und/oder Schneefall",
+  "96" => "leichtes oder mäßiges Gewitter mit Hagel oder Graupel",
+  "97" => "starkes Gewitter mit Regen und/oder Schneefall",
+  "98" => "Gewitter mit Staub- oder Sandsturm",
+  "99" => "starkes Gewitter mit Hagel oder Graupel"
+);
+
+# weatherPresentSimple - keys
+%WSYNOP_SIMPLE = (
+  "00" => "kein signifikantes Wetter",
+  "01" => "Bewölkung in vergang. Stunde insgesamt abnehmend",
+  "02" => "Bewölkung in vergang. Stunde insgesamt unverändert",
+  "03" => "Bewölkung in vergang. Stunde insgesamt zunehmend",
+  "04" => "trockener Dunst, Rauch oder Schwebstaub, Sicht 1 km oder mehr",
+  "05" => "trockener Dunst, Rauch oder Schwebstaub, Sicht geringer als 1 km",
+  "10" => "feuchter Dunst",
+  "11" => "Eisnadeln",
+  "12" => "Blitze in der Ferne",
+  "18" => "Sturmböen",
+  "20" => "Nebel in vergang. Stunde",
+  "21" => "Niederschlag in vergang. Stunde",
+  "22" => "Sprühregen oder Schneegriesel in vergang. Stunde",
+  "23" => "Regen in vergang. Stunde",
+  "24" => "Schneefall in vergang. Stunde",
+  "25" => "gefrierender Sprühregen oder gefrierender Regen in vergang. Stunde",
+  "26" => "Gewitter in vergang. Stunde",
+  "27" => "treibender Sand, Schneetreiben oder -fegen",
+  "28" => "treibender Sand, Schneetreiben oder -fegen, Sicht 1 km oder mehr",
+  "29" => "treibender Sand, Schneetreiben oder -fegen, Sicht geringer als 1 km",
+  "30" => "Nebel",
+  "31" => "Schwaden von Nebel oder gefrierendem Nebel",
+  "32" => "Nebel oder gefrierender Nebel, in vergang. Stunde dünner geworden",
+  "33" => "Nebel oder gefrierender Nebel",
+  "34" => "Nebel oder gefrierender Nebel, in vergang. Stunde eingesetzt oder dichter geworden",
+  "35" => "Nebel, Reif",
+  "40" => "Niederschlag",
+  "41" => "leichter oder mäßiger Niederschlag",
+  "42" => "starker Niederschlag",
+  "43" => "leichter oder mäßiger Niederschlag in flüssiger Form",
+  "44" => "starker Niederschlag in flüssiger Form",
+  "45" => "leichter oder mäßiger Niederschlag in fester Form",
+  "46" => "starker Niederschlag in fester Form",
+  "47" => "leichter oder mäßiger gefrierender Niederschlag",
+  "48" => "starker gefrierender Niederschlag",
+  "50" => "Sprühregen",
+  "51" => "leichter Sprühregen",
+  "52" => "mäßiger Sprühregen",
+  "53" => "starker Sprühregen",
+  "54" => "leichter gefrierender Sprühregen",
+  "55" => "mäßiger gefrierender Sprühregen",
+  "56" => "starker gefrierender Sprühregen",
+  "57" => "leichter Sprühregen und Regen",
+  "58" => "mäßiger oder starker Sprühregen und Regen",
+  "60" => "Regen",
+  "61" => "leichter Regen",
+  "62" => "mäßiger Regen",
+  "63" => "starker Regen",
+  "64" => "leichter gefrierender Regen",
+  "65" => "mäßiger gefrierender Regen",
+  "66" => "starker gefrierender Regen",
+  "67" => "leichter Regen (oder Sprühregen) und Schneefall",
+  "68" => "mäßiger oder starker Regen (oder Sprühregen) und Schneefall",
+  "70" => "Schneefall",
+  "71" => "leichter Schneefall",
+  "72" => "mäßiger Schneefall",
+  "73" => "starker Schneefall",
+  "74" => "leichter Fall von Eiskörnern",
+  "75" => "mäßiger Fall von Eiskörnern",
+  "76" => "starker Fall von Eiskörnern",
+  "77" => "Schneegriesel",
+  "78" => "Eisnadeln",
+  "80" => "Schauer oder Niederschlag mit Unterbrechungen",
+  "81" => "leichte Regenschauer oder leichter Regen mit Unterbrechungen",
+  "82" => "mäßige Regenschauer oder mäßiger Regen mit Unterbrechungen",
+  "83" => "starke Regenschauer oder starker Regen mit Unterbrechungen",
+  "84" => "äußerst heftige Regenschauer oder äußerst heftiger Regen mit Unterbrechungen",
+  "85" => "leichte Schneeschauer oder leichter Schneefall mit Unterbrechungen",
+  "86" => "mäßige Schneeschauer oder mäßiger Schneefall mit Unterbrechungen",
+  "87" => "starke Schneeschauer oder starker Schneefall mit Unterbrechungen",
+  "89" => "Hagel",
+  "90" => "Gewitter",
+  "91" => "leichtes oder mäßiges Gewitter",
+  "92" => "leichtes oder mäßiges Gewitter mit Regen- bzw. Schneeschauern",
+  "93" => "leichtes oder mäßiges Gewitter mit Hagel",
+  "94" => "schweres Gewitter",
+  "95" => "schweres Gewitter mit Regen- bzw. Schneeschauern",
+  "96" => "schweres Gewitter mit Hagel",
+  "99" => "Wind-/Wasserhose"
+);
+
+#weatherPast / weatherPastSimple
+%WSYNOP_PAST = (
+  "0" => "Wolkendecke, Himmel halb oder weniger bedeckt",
+  "1" => "Wolkendecke, Himmel zeitweise weniger, zeitweise mehr als die Hälfte bedeckt",
+  "2" => "Wolkendecke, Himmel mehr als die Hälfte bedeckt",
+  "3" => "Sandsturm, Staubsturm oder Schneetreiben",
+  "4" => "(gefrierender) Nebel oder dichter trockener Dunst",
+  "5" => "Sprühregen",
+  "6" => "Regen",
+  "7" => "Schneefall oder Schneeregen",
+  "8" => "Schauer",
+  "9" => "Gewitter"
+);
+
+%DEBUG_TXT =( 0 => "AUS", 1 => "TEILWEISE", 2 => "VOLL");
+
+# ====================================================================
+# Programm MAIN
+# ====================================================================
+%report  = (); %collect = (); $line = 0;
+parse_file($FILE_NAME);
+
+# ====================================================================
+# Service Funktionen
+# ====================================================================
+sub parse_file {
+  $file = $FILE_NAME;
+  $table= $TABLE;
+  $date_begin=`date \'+%Y-%m-%d %H:%M:%S\'`;
+  print $COMMENT.$DLINE."\n";
+  print $COMMENT."$TOOL $VERSION\n";
+  print $COMMENT.$DLINE."\n";
+  print $COMMENT, "METAR: \t", $FILE_NAME, "\n";
+  print $COMMENT, "FORMAT:\t", $FORMAT, "\n";
+  print $COMMENT, "TABLE: \t", $TABLE, "\n";
+  print $COMMENT, "DEBUG: \t", $DEBUG_TXT{$DEBUG}, "\n\n";
+  # Datei oeffnen 
+  open ( FIN,  "<$file" ) || die "Unkown file $file \n"; 
+  while (<FIN>) {
+          $cnt=0;  $line++;
+          next if /NIL=$/;
+          last if ($STOP > 0) && ($line >= $STOP);
+          ($site, $year, $month, $day, $hour, $min, $message) = split(",",$_);
+          chomp($message);
+          next if length($message) < 12;
+          print "\n".$COMMENT.$SLINE."\n" if $DEBUG;
+          print $COMMENT.$line.": ".$message, "\n" if $DEBUG;
+          print $COMMENT.$SLINE."\n" if $DEBUG;
+          translate_message($message, $TYPE, $year, $month, $day);
+  }
+  close(FIN);
+  $date_end=`date \'+%Y-%m-%d %H:%M:%S\'`;
+  print $COMMENT.$DLINE."\n";
+  print $COMMENT."ENDE $TOOL  $date_end\n";
+  print $COMMENT.$DLINE."\n";
+}
+
+# ----------------------------------------------------------------------
+sub translate_message {
+	local $m = $_[0]; 
+	local $t = $_[1]; 
+	local $Y = $_[2]; 
+	local $M = $_[3];  
+	local $D = $_[4];
+	
+	%report  = ();
+	%collect = ();
+    %report  = metaf2xml::parser::parse_report($m,$t);
+	print_report(\%report) if $DEBUG == 2 ;
+    print $COMMENT.$SLINE."\n" if $DEBUG == 2;
+	chomp($m);
+	$collect{obs_code}="\'".$m."\'";
+	local @blks = split(/\s+/,$m);
+	syp_get_station($blks[0])   if $PARSE_LOCATION;
+	msg_get_time($Y, $M, $D)    if $PARSE_TIME;
+	local $err = $report{ERROR} if $PARSE_ERROR;
+	if ( defined($err) ) {
+	  $collect{error} = "TRUE";
+	} else {
+      $collect{error} = "FALSE";
+	  syp_get_vis()       if $PARSE_VISIBILITY;
+	  syp_get_temp()      if $PARSE_TEMPERATURE ;
+	  syp_get_sfc_wind()  if $PARSE_WIND;
+	  syp_get_pressure()  if $PARSE_PRESSURE;
+	  syp_get_cloud()     if $PARSE_CLOUDS;
+	  syp_get_weather()   if $PARSE_WEATHER;
+	  syp_get_precip()    if $PARSE_PRECIP;
+    }
+    switch ($FORMAT) {
+	  case "DEBUG" {
+		foreach $key (sort keys %collect) {
+			$value = $collect{$key};
+			$name = $DESC{$key};
+			 print sprintf("%14s %22s  %s\n",$key, $value, $name);
+		} 
+	  }
+	  case "TEXT" {
+		foreach $key (sort keys %collect) {
+			$value = $collect{$key};
+			$name = $DESC{$key};
+			 print sprintf("%14s %22s  %s\n",$key, $value, $name);
+		}	 
+      }		  
+	  case "PGSQL" {
+		print "INSERT INTO\n$table"; 
+		local @keys = sort keys %collect;
+		local @vals = (); 
+		local $vcnt=0;
+		foreach $key (@keys) {
+			$vals[$vcnt++] = $collect{$key};
+	    }	
+		print "(".join(",",@keys).")\n";
+		print "VALUES (".join(",",@vals).");\n\n";
+      }		  
+    }
+}
+# ---------------------------------------------------------------------
+sub syp_get_station {
+	local $data = $report{obsStationId}{id};
+    $collect{obs_site}  = "\'".$data."\'";
+    $collect{obs_ptc}   = "\'".$_[0]."\'";
+    $collect{obs_msg}  = "\'".$TYPE."\'";
+}
+# ---------------------------------------------------------------------
+sub syp_get_vis {
+	local ($data, $datas, $unit, $units, $ddst, $limit) = (
+	  get_val($report{visPrev}{distance}{v},"NULL"),
+	  get_val($report{visPrev}{distance}{v},"NULL"),
+	  get_val($report{visPrev}{distance}{u},"M"),
+	  get_val($report{visPrev}{distance}{u},"M"),
+	  get_val($report{visPrev}{distance}{rp},"NULL"),
+	  get_val($report{visPrev}{distance}{q},"NULL")
+	);
+	local ($data,  $unit) = unit_cv($data, $unit);
+	local ($datas, $units) = unit_cv($datas, $units);
+	local ($datas, $limit) = unit_cv($datas, $limit);
+    $collect{pv_vs_val}  = $data;
+    $collect{pv_vs_unt}  = $unit;
+    $collect{pv_vs_ddist}  = $ddst;
+    
+    $collect{pv_vs_valx}  = "\'".$datas."\'" if !$data eq "NULL";
+    $collect{pv_vs_untx}  = $limit if !$limit eq "NULL";
+ }
+
+# ---------------------------------------------------------------------
+sub syp_get_temp {
+	local ($nrh, $data) = ( 0, 0);
+
+    for $try (1..10) {
+	 local ($rh, $unit) = (
+	   get_val($report{temperature}{relHumid.$try}{v},"NULL"),"%");
+	   if ($rh eq "NULL") {
+		   last;
+       } else {
+   	      ($nrh, $data) = ($nrh += 1, $data += $rh) 
+	   }	   
+    } 
+    if ($nrh > 0) {
+      $collect{sfc_rh_val}  = sprintf("%2.0f",$data /= $nrh);
+      $collect{sfc_rh_unt}  = "\'%\'";
+    }  else {
+      $collect{sfc_rh_val}  = "NULL" ;
+      $collect{sfc_rh_unt}  = "NULL";
+	}
+    local ($data, $unit) = (
+	   get_val($report{temperature}{air}{temp}{v},"NULL"),
+	   get_val($report{temperature}{air}{temp}{u},"C"));
+	# print Dumper($data, $unit);
+	local ($data, $unit) = unit_cv($data, $unit);
+    $collect{sfc_at_val}  = sprintf("%2.0f",$data);
+    $collect{sfc_at_unt}  = $unit;
+    local ($data, $unit) = (
+	   get_val($report{temperature}{dewpoint}{temp}{v},"NULL"),
+	   get_val($report{temperature}{dewpoint}{temp}{u},"C"));
+	local ($data, $unit) = unit_cv($data, $unit);
+    $collect{sfc_dp_val}  = sprintf("%2.0f",$data);
+    $collect{sfc_dp_unt}  = $unit;
+}
+# ---------------------------------------------------------------------
+sub syp_get_weather 
+{                  
+	$wth = $report{weatherSynop};
+	return if ! defined($wth);
+	if ( ($wthp = $report{weatherSynop}{timeBeforeObs}{hours}) ) {
+		$collect{wth_tbf_val} = $wthp;
+		$collect{wth_tbf_unt} = "\'h\'";
+    }	
+	
+	if ( ($wthp = $report{weatherSynop}{weatherPresent}) ) {
+		$wthpk = $WSYNOP{$wthp};
+		$collect{wth_now_key} = "\'".$wthp."\'";
+		$collect{wth_now_dsc} = "\'".$wthpk."\'";
+	} elsif ( ($wthp = $report{weatherSynop}{weatherPresentSimple}) ) {
+		$wthpk = $WSYNOP_SIMPLE{$wthp};
+		$collect{wth_now_key} = "\'".$wthp."\'";
+		$collect{wth_now_dsc} = "\'".$wthpk."\'";
+	}	
+
+	if ( ($wthp = $report{weatherSynop}{weatherPast1}) ) {
+		$wthpk = $WSYNOP_PAST{$wthp};
+		$collect{wth_bef0_key} = "\'".$wthp."\'";
+		$collect{wth_bef0_dsc} = "\'".$wthpk."\'";
+	} elsif ( ($wthp = $report{weatherSynop}{weatherPast1Simple}) ) {
+		$wthpk = $WSYNOP_PAST{$wthp};
+		$collect{wth_bef0_key} = "\'".$wthp."\'";
+		$collect{wth_bef0_dsc} = "\'".$wthpk."\'";
+	}	
+	
+	if ( ($wthp = $report{weatherSynop}{weatherPast2}) ) {
+		$wthpk = $WSYNOP_PAST{$wthp};
+		$collect{wth_bef1_key} = "\'".$wthp."\'";
+		$collect{wth_bef1_dsc} = "\'".$wthpk."\'";
+	} elsif ( ($wthp = $report{weatherSynop}{weatherPast2Simple}) ) {
+		$wthpk = $WSYNOP_PAST{$wthp};
+		$collect{wth_bef1_key} = "\'".$wthp."\'";
+		$collect{wth_bef1_dsc} = "\'".$wthpk."\'";
+	}	
+	# print Dumper($wth);
+}
+# ---------------------------------------------------------------------
+sub syp_get_precip
+{   
+	local $num_pcp=0;               
+	# local $t = $report{precipitation};
+	# print Dumper($t);
+	local $pcpv = $report{precipitation}{precipAmount}{v};
+	if ( $pcpv ) {
+    	local $pcpt = $report{precipitation}{timeBeforeObs}{hours};
+  	    local $pcpu = $report{precipitation}{precipAmount}{u};
+		$collect{sprintf("pcp_am%d_val",$num_pcp)} = $pcpv if $pcpv;
+		$collect{sprintf("pcp_am%d_unt",$num_pcp)} = "\'".lc($pcpu)."\'";
+		$collect{sprintf("pcp_tb%d_val",$num_pcp)} = $pcpt if $pcpt;
+		$collect{sprintf("pcp_tb%d_unt",$num_pcp)} = "\'h\'";
+		$num_pcp++;
+	}
+	local $s3 =(); local $cs3=0;
+	while ( $s3 = $report{section3}[$cs3++] ) {
+ 	    last if $num_pcp > $NUM_ITER;
+		$pcpv = $s3->{precipitation}{precipAmount}{v};
+		next if ! defined($pcpv);
+		local $pcpt = $s3->{precipitation}{timeBeforeObs}{hours};
+		local $pcpu = $s3->{precipitation}{precipAmount}{u};
+		$collect{sprintf("pcp_am%d_val",$num_pcp)} = $pcpv if $pcpv;
+		$collect{sprintf("pcp_am%d_unt",$num_pcp)} = "\'".lc($pcpu)."\'";
+		$collect{sprintf("pcp_tb%d_val",$num_pcp)} = $pcpt if $pcpt;
+		$collect{sprintf("pcp_tb%d_unt",$num_pcp)} = "\'h\'";
+		$num_pcp++;
+	}	
+    $collect{pcp_samples} = $num_pcp;
+}
+
+# ---------------------------------------------------------------------
+sub syp_get_cloud {
+	local $num_cld=0;
+	local (@cdk, @cdu, @cdv, @cbv, @cbu,@cbr) = ( (),(),(),(),(),() );
+	local $s3 =(); local $cs3=0;
+	while ( $s3 = $report{section3}[$cs3++] ) {
+		local $cloud = $s3->{cloudInfo}{sortedArr};
+		next if ! defined($cloud);
+   	    local $ccloud=0; 
+   	    # print Dumper($cloud);
+     	while ( $chash = $cloud->[$ccloud++] ) {
+   	        # print Dumper($chash);
+   	        last if $num_cld > $NUM_ITER;
+			do {
+  		      # print Dumper($chash->{cloudBase}{v});
+  		      # print Dumper($chash->{cloudBase}{u});
+  		      # print Dumper($chash->{cloudBase}{rp});
+  			  ($cbv[$num_cld], $cbu[$num_cld], $cbr[$num_cld]) = (
+			    get_val($chash->{cloudBase}{v},"NULL"),
+			    get_val($chash->{cloudBase}{u},"NULL"),
+			    get_val($chash->{cloudBase}{rp},undef)
+			  );
+ 			 ($cbv[$num_cld], $cbu[$num_cld]) = 
+ 			                    unit_cv($cbv[$num_cld], $cbu[$num_cld]);
+ 	         $collect{sprintf("cld_bs_dgh_%s" ,$num_cld)} 
+ 	                                 = $cbr[$num_cld] if $cbr[$num_cld];
+		     $collect{sprintf("cld_bs_val_%s", $num_cld)} 
+		                                              = $cbv[$num_cld] ;
+  		      
+			} if $chash->{cloudBase};
+			do {
+		     $cdv[$num_cld] = $chash->{cloudOktas}{oktas};
+		     if ($cdv[$num_cld]) {
+   	           $collect{sprintf("cld_ds_val_%s" ,$num_cld)} 
+   	                                                   = $cdv[$num_cld];
+		       $collect{sprintf("cld_ds_key_%s", $num_cld)}
+		                         = "\'".($cdv[$num_cld]/8.0*100)." %\'";
+   	           $collect{sprintf("cld_ds_unt_%s" ,$num_cld)} 
+   	                                     = "\'W.".$cdv[$num_cld]."/8\'";
+			 }
+			} if $chash->{cloudOktas};
+			do {
+  		      $cdk[$num_cld] = $chash->{cloudType};
+  		      $collect{sprintf("cld_ct_key_%s" ,$num_cld)}
+  		                = "\'".$cdk[$num_cld]."\'" if $cdk[$num_cld];
+			} if $chash->{cloudType};
+	    }	
+	    $num_cld++;   
+		# print Dumper($s3);
+		# print Dumper($cloud[0]->{cloudBase});
+	}	
+    if ($num_cld>0) {
+		local $sum  = sum(@cdv);  $sum = 8 if $sum > 8;
+		local $avg  = sum(@cdv)/@cdv;
+		local $val   = join (" ", @cdv);
+		local $key   = join (" ", @cdk);
+		local $unit  = join (" ", @cdu);
+		$collect{cld_level}   = $num_cld;
+		$collect{cld_ds_sum}  = $sum;
+		$collect{cld_ds_avg}  = sprintf("%2.1f",$avg);
+	}	
+    if ($num_cld>0) {
+		local $high  = max ( @cbv);
+		local $low   = min ( @cbv);
+		local $delta = max ( @cbr);
+		$collect{cld_bs_min}  = $high if $high;
+		$collect{cld_bs_max}  = $low  if $low;
+		$collect{cld_bs_unt}  = $cbu[0] if $cbu[0];
+		$collect{cld_bs_dgh_max} = $delta if $delta;
+	}	
+	
+}
+# ---------------------------------------------------------------------
+sub syp_get_pressure {
+	local ($data, $unit) = (
+	  get_val($report{stationPressure}{pressure}{v},"NULL"),
+	  get_val($report{stationPressure}{pressure}{u},"hPa"),
+	);
+	local ($data, $unit) = unit_cv($data, $unit);
+    $collect{sfc_p_val} = sprintf("%2.1f",$data);
+    $collect{sfc_p_unt} = $unit;
+	local ($data, $unit) = (
+	  get_val($report{SLP}{pressure}{v},"NULL"),
+	  get_val($report{SLP}{pressure}{u},"hPa"),
+	);
+	local ($data, $unit) = unit_cv($data, $unit);
+    $collect{slp_p_val} = sprintf("%2.1f",$data);
+    $collect{slp_p_unt} = $unit;
+    
+}
+# ---------------------------------------------------------------------
+sub syp_get_sfc_wind {
+	local ($data, $unit) = (
+	  get_val($report{sfcWind}{wind}{speed}{v},"NULL"),
+	  get_val($report{sfcWind}{wind}{speed}{u},"KT")
+	);
+	local ($data, $unit) = unit_cv($data, $unit);
+	$collect{sfc_wv_val}  = $data;
+	$collect{sfc_wv_unt}  = $unit;
+	local ($data, $unit) = (
+	  get_val($report{sfcWind}{wind}{dir}{v},"NULL"), "GRAD");  
+	local ($data, $unit) = unit_cv($data, $unit);
+	$collect{sfc_wd_val}   = $data;
+	$collect{sfc_wd_unt}  = $unit;
+	if ($data eq "NULL") {
+	  $collect{sfc_wd_from}  = "NULL";
+	} else {
+	  $collect{sfc_wd_from}  = "\'".$COMP_16[int($data / 22.5)]."\'";
+    }
+    $collect{sfc_wd_dneg} = get_val($report{sfcWind}{wind}{dir}{rn},"NULL");  
+    $collect{sfc_wd_dpos} = get_val($report{sfcWind}{wind}{dir}{rp},"NULL");  
+    local ($data, $unit) =  (
+      get_val($report{sfcWind}{measurePeriod}{v},"NULL"),
+      get_val($report{sfcWind}{measurePeriod}{u},"NULL")
+    );  
+	local ($data, $unit) = unit_cv($data, $unit);
+    $collect{sfc_ws_val}  = $data;
+    $collect{sfc_ws_unt} = $unit;
+}	
+
+# ---------------------------------------------------------------------
+sub unit_cv {
+  local $data = $_[0];
+  local $unit = $_[1];
+  
+  $unit = 'NULL' if $data eq 'NULL';
+  
+  switch ($unit) {
+	  case "NULL" {  $data  = "NULL"; }
+	  case "MPS"  {  $data /= 1.0;   $unit = $UNIT_MPS; }
+	  case "KMH"  {  $data /= 3.6;   $unit = $UNIT_MPS; }
+	  case "KT"   {  $data *= 0.514; $unit = $UNIT_MPS; }
+	  case "GRAD" {  $data *= 1.0;   $unit = $UNIT_GRD; }
+	  
+	  case "SEC"  {  $data *= 1.0;   $unit = $UNIT_SEC; }
+	  case "MIN"  {  $data *= 60.0;   $unit = $UNIT_SEC; }
+
+	  case "hPa"  {  $data *= 1.0;   $unit = $UNIT_PRES; }
+	  case "mmHg" {  $data *= 133.3/100.0; 
+	                 $unit = $UNIT_PRES; }
+	  case "inHg" {  $data *= 3386.389/100.0; 
+	                 $unit = $UNIT_PRES; }
+
+	  case "m"    {  $data *= 1.0;   $unit = $UNIT_DIST; }
+	  case "M"    {  $data *= 1.0;   $unit = $UNIT_DIST; }
+	  case "FT"   {  $data *= 0.3048;   $unit = $UNIT_DIST; }
+	  case "KM"   {  $data *= 1000.0;   $unit = $UNIT_DIST; }
+	  case "SM"   {  $data *= 1000.0;   $unit = $UNIT_DIST; }
+	  
+	  case "%"    {  $data *= 1.0;   $unit = $UNIT_PERC; }
+	  case "C"    {  $data *= 1.0;   $unit = $UNIT_GRDC; }
+	  case "F"    {  $data = ($data-32)*5.0/9.0; $unit = $UNIT_GRDC; }
+	                 
+	  case "isGreater"      { $data = "> ".$data; $unit = "\'LIM.GT\'"; }
+	  case "isEqualGreater" { $data = "> ".$data; $unit = "\'LIM.GE\'"; }
+	  case "isLess"         { $data = "< ".$data; $unit = "\'LIM.LT\'"; }
+	                 
+	  case "CLOUD."      { $data = "NULL"; $unit = "NULL"; }
+	  case "CLOUD.CAVOK" { $data = 0;   $unit = "F.0"; }
+	  case "CLOUD.CLR"   { $data = 0;   $unit = "F.0"; }
+	  case "CLOUD.SKC"   { $data = 0;   $unit = "F.0"; }
+	  case "CLOUD.NSC"   { $data = 0.5; $unit = "F.0-1"; }
+	  case "CLOUD.FEW"   { $data = 1.5; $unit = "F.1-2"; }
+	  case "CLOUD.SCT"   { $data = 3.5; $unit = "F.3-4"; }
+	  case "CLOUD.BKN"   { $data = 6;   $unit = "F.5-7"; }
+	  case "CLOUD.OVC"   { $data = 8;   $unit = "F.8"; }
+	  
+	  else { die "Unkown unit $unit at $file> $line: $msg \n";}
+  }
+  return ($data, $unit);
+}
+
+# ---------------------------------------------------------------------
+sub get_val {
+	local $dta = $_[0];
+	local $def = $_[1];
+	local $n = ( $dta eq ""); 
+	local $e = ( $dta =~ /\s+/ ); 
+	# print "X=$dta:$def:$n:$u:$e\n"; 
+	return $def if $e;
+	return $def if $n;
+	return $dta;
+}
+
+# ---------------------------------------------------------------------
+sub msg_get_time {
+	local  $dt = join('-',@_);
+	local  @tm =
+	 ( $report{obsTime}{timeAt}{hour},"00", "00" );
+	$tm = join (':', @tm);
+	$collect{obs_time} = "\'".$dt." ".$tm."\'";
+}
+
+# ---------------------------------------------------------------------
+sub print_report {
+
+	local $data = shift;
+	while (($key, $value) = each(@$data)){
+		 local $t=ref($value);
+		 print "/".$key;
+		 if ($t eq "HASH") {
+			 $cnt++;
+			 print ".H".$cnt;
+			 print_report($value);
+			 $cnt--;
+		 } elsif ($t eq "ARRAY") {
+			 $cnt++;
+			 print ".A".$cnt;
+			 print_report($value);
+			 $cnt--;
+		 } elsif ($t eq "") {
+			print "=$value;";
+		 }
+		 if ($cnt==0) { print "\n"; }
+	}
+}
+
+# ======================================================================
+# TESTNACHRICHTEN
+# ======================================================================
+@TEST_MSGS = (
+);
+
+
+# --- EOF -------------------------------------------------------------

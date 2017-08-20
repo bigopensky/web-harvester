@@ -1,0 +1,6 @@
+#!/bin/bash
+DATA_PATH="synop";
+for f in $(ls $DATA_PATH/*.csv); do
+ echo "$(date) $f";
+ ./parse-synop $f PGSQL | psql -q ogimet;
+done

@@ -1,0 +1,40 @@
+#!/usr/bin/perl
+use Data::Dumper;
+# ------------------------------------------------
+# Import ICAO Index keine offizielle Quelle 
+# (c) XII/2012 IFAOE.DE A. Weidauer 
+# ------------------------------------------------
+$file = "data/station-icao.txt";
+$table = "ICAO";
+# ------------------------------------------------
+open(FIN,"<$file") ||
+ die "Kann Datei $file nicht oeffnen!\n";
+ 
+@field = qw(icao site lon lat hgt);
+while ( <FIN>  ) {
+ chomp;
+ ($icao,$iata,$loc,$site,$country,
+  $latd,$latm,$lats,$latk,
+  $lond,$lonm,$lons,$lonk,
+  $hgt) = split (":",$_);
+  next if $latk eq "U";
+  next if $lonk eq "U";
+  $lonm = $lonm*60.0 + $lons;
+  $lon  = $lond + $lonm/3600.0;
+  $lon = - $lon if $lonk eq "W";
+  $latm = $latm*60 + $lats;
+  $lat  = $latd + $latm/3600.0;
+  # print Dumper ($latk);
+  $lat = - $lat if $latk eq "S";
+  @res = ("\'".$icao."\'", 
+          "\'".$site."\'", 
+          sprintf("%2.4f",$lon), 
+          sprintf("%2.4f",$lat),
+          sprintf("%2.0f", $hgt));
+  print "INSERT INTO $table ( ",join(", ",@field), ") \n";
+  print "VALUES ( ",join(", ",@res), ");\n\n";
+}
+close(FIN);
+# ------------------------------------------------
+# EOF
+# ------------------------------------------------

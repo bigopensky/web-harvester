@@ -1,0 +1,61 @@
+#!/usr/bin/perl
+use Data::Dumper;
+# ---------------------------------------------
+# Erstellen des WMO/ICAO INDEX 
+# (C) XII/2012 A. Weidauer
+# ---------------------------------------------
+
+$TABLE = "WMO";
+$FILE = "data/station-wmo.txt";
+# $FORMAT = "TEXT"; 
+$FORMAT= "PGSQL";
+
+# ---------------------------------------------
+open(FIN,"<$FILE") ||
+ die "Kann Datei $file nicht oeffnen!\n";
+ 
+# ---------------------------------------------
+@field = qw(wmo icao site country lon lat hgt);
+print $table,"\n" if $FORMAT eq "PGSQL"; 
+print join("\t",@field),"\n" if $FORMAT eq "TEXT";
+while ( <FIN>  ) {
+ chomp;
+ ($wmop,$wmos,$icao,$site,$loc,$country,$iso,
+  $lats1,$lons1,$lats2,$lons2,$hgt1,$hgt2)
+  = split (";",$_);
+  next if $lats1 eq "";
+  next if $lons1 eq "";
+  $wmo = $wmop.$wmos;
+  $lonk = chop ($lons1);
+  $latk = chop ($lats1);
+  ($lond,$lonm,$lons) = split ("-",$lons1);
+  ($latd,$latm,$lats) = split ("-",$lats1);
+  $site =~ s/'/''/g;
+  $site =~ s/\s+\\/,/g;
+  $country =~ s/'/''/g;
+  $lons = 0 if ! $lons;
+  $lats = 0 if ! $lats;
+  $lonm = $lonm*60.0 + $lons;
+  $lon  = $lond + $lonm/3600.0;
+  $lon = - $lon if $lonk eq "W";
+  $latm = $latm*60 + $lats;
+  $lat  = $latd + $latm/3600.0;
+  # print Dumper ($latk);
+  $lat = - $lat if $latk eq "S";
+  @res = ("\'".$wmo."\'", 
+          "\'".$icao."\'", 
+          "\'".$site."\'", 
+          "\'".$country."\'", 
+          sprintf("%2.4f",$lon), 
+          sprintf("%2.4f",$lat),
+          sprintf("%2.0f", $hgt1)); # ,$lonk,$latk);
+  print "INSERT INTO WMO ( ",join(", ",@field), ") \n" if $FORMAT eq "PGSQL";
+  print "VALUES ( ",join(", ",@res), ");\n\n" if $FORMAT eq "PGSQL";
+  print join("\t",@res),"\n" if $FORMAT eq "TEXT";
+  
+}
+close(FIN);
+
+# ---------------------------------------------
+# EOF
+# ---------------------------------------------

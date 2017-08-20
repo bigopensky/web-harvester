@@ -1,0 +1,57 @@
+#!/usr/bin/perl
+# -----------------------------------------------------------
+# WEB Reader der mit Hilfe von CURL die daten von OGIMET holt
+# -----------------------------------------------------------
+# (c) A. Weidauer 2012 alex.weidauer@huckfinn.de
+# -----------------------------------------------------------
+use strict;
+
+# Datenpfad
+my $DATA_PATH='data.time';
+
+# Time OUT
+my $SLEEP = 60*10;
+
+# Jahr von bis
+my @year=(2012..2016);
+
+# Land / Korrespondierndes Kuerzel (Dateiname)
+my ($country, $scountry) = ("Germany", "de");
+# $country="Norway";  $Scountry="no";
+# Dienstbeschreibung (CGI - Skript)
+
+# Telegrammtyp
+my $service="getmetar";
+# $service="getsynop";
+
+# Monate von bis
+my @month=("01".."01");
+my $FULL_MONTH=0;
+
+for my $y (@year) { 
+    for my $m (@month) {
+        # Aufbau der Tagesliste
+
+        my @days=("01".."01");
+
+        # Schaltjahrkorrektur
+        if ($y % 4 == 0 && $m == "02" && $FULL_MONTH)  { @days=("01".."28"); }
+        if ($y % 4 != 0 && $m == "02" && $FULL_MONTH)  { @days=("01".."29"); }
+
+        # Tagesskorrektur
+        if ($m % 2 == 0 && $m > "07" && $FULL_MONTH)  { @days=("01".."31"); }
+        if ($m % 2 != 0 && $m < "08" && $FULL_MONTH)  { @days=("01".."31"); }
+
+        # Tagesbloecke
+        for my $d (@days) {
+            print "..$service $y $m $d \n";
+            my $cmd = "http://www.ogimet.com/cgi-bin/${service}?begin=${y}${m}${d}0000&end=${y}${m}${d}2300&state=$country&lang=eng";
+            print $cmd,"\n";
+            my @res=`wget -q -O $DATA_PATH/metar-$y-$m-$d-$scountry.csv $cmd`;
+            sleep($SLEEP);
+    }
+  } 
+}
+# ----------------------------------------------------------
+# EOF
+# ----------------------------------------------------------
