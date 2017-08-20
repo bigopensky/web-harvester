@@ -49,8 +49,8 @@ taxonimic species context:
 * -c --get-children ID
   Get subsequent taxa fo a specific AphiaID
 
-Due to it's Q&D role for the adustment of the hierarchie is made
-on distinct taxonomic levels
+Due to it's Q&D role the adustment of the hierarchie is made
+on the distinct taxonomic levels:
 
 KINDOM, PHYLUM, ORDER, CLASS, FAMILY, GENUS, SPECIES
 
@@ -59,7 +59,7 @@ KINDOM, PHYLUM, ORDER, CLASS, FAMILY, GENUS, SPECIES
 example).  To maintain an canonic taxonomic classisfication/ meaning
 the flags for synonyme names are provided.
 
-The primary key in the WoRMS information context is called AphiaID.
+The primary key in the WoRMS information context is called **AphiaID**.
 
 The resulting context is writte in three the text formats DUMP, CSV and SQL.
 Please follow the help context to get info's about the format structure.
@@ -138,7 +138,8 @@ EOF
 ## License
 
 Copyright (C) 2012 Alexander Weidauer
-Contact: alex.weidauer@huckfinn.de
+
+Contact: alex.weidauer(AT)huckfinn.de
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
