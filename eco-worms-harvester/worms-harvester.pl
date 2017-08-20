@@ -1,9 +1,24 @@
 #!/usr/bin/perl
 # ------------------------------------------------------------
-# WORMS HARVESTER fuer die Abfrage mariner Arten 
+# WORMS HARVESTER Query tool or marine taxa
 # ------------------------------------------------------------
-# (C) 2012 IFGDV - A. Weidauer 
-# KONTAKT alex.weidauer@huckfinn.de
+# (C) 2012 IfGDV - A. Weidauer
+# -----------------------------------------------------------------
+# Copyright (C) 2012 Alexander Weidauer
+# Contact: alex.weidauer@huckfinn.de
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 # ------------------------------------------------------------
 #@TODO PROOF OF CONCEPT
 # ------------------------------------------------------------
@@ -12,11 +27,15 @@ use Pod::Usage;
 use Switch;
 use strict;
 use Data::Dumper;
+use utf8;
 
 my $DEBUG = 0;
+binmode STDOUT, ":utf8";
+binmode STDERR, ":utf8";
+
 
 # ------------------------------------------------------------
-# SOAP Client vorbereiten 
+# Prepare SOAP Client
 # ------------------------------------------------------------
 my $endpoint = qq{http://www.marinespecies.org/aphia.php?p=soap};
 my $tns = "http://aphia/v1.0" ;
@@ -25,45 +44,47 @@ my $soapaction = $tns;
 my $sObj = SOAP::Lite->new(uri => $soapaction, proxy => $endpoint);
 
 # -------------------------------------------------
-# DEFINITION: Ausgabe Felder, Sortierung und Muster
+# DEFINITION: IO fields, sortation and patter
 # -------------------------------------------------
-# Feldnamen DUMP
-my @ORDER_TAB=qw (APHIA_ID NAME AUTHOR RANK STATUS VALID_APHIA_ID VALID_NAME 
-         VALID_AUTHOR RNK_KINGDOM RNK_PHYLUM RNK_CLASS RNK_ORDER 
+# Field name dump output
+my @ORDER_TAB=qw (APHIA_ID NAME AUTHOR RANK STATUS VALID_APHIA_ID VALID_NAME
+         VALID_AUTHOR RNK_KINGDOM RNK_PHYLUM RNK_CLASS RNK_ORDER
          RNK_FAMILY RNK_GENUS CITATION );
 
-# Feldnamen bzw. Spaltennamen SQL und CSV
-my @ORDER_CSV=qw (APHIA.ID NAME AUTHOR RANK STATUS VALID.APHIA.ID VALID.NAME 
-         VALID_AUTHOR KINGDOM PHYLUM CLASS ORDER 
+# Field names SQL / CSV
+my @ORDER_CSV=qw (APHIA.ID NAME AUTHOR RANK STATUS VALID.APHIA.ID VALID.NAME
+         VALID_AUTHOR KINGDOM PHYLUM CLASS ORDER
          FAMILY GENUS CITATION);
 
-# Zuordnung der SOAP Eintraege zu den Feldnamen (INDEX)
+# SOAP entry mapping to field names
 my %ORDER_HASH = (
-  "AphiaID"       =>  0, "scientificname"  =>  1, "authority"  =>  2, 
-  "rank"          =>  3,  "status"        =>  4,
-  "valid_AphiaID" =>  5, "valid_name" =>  6, "valid_authority" =>  7, 
-  "kingdom"       =>  8, "phylum"     =>  9, "class"           => 10, 
+  "AphiaID"       =>  0, "scientificname"  =>  1, "authority"  =>  2,
+  "rank"          =>  3, "status"        =>  4,
+  "valid_AphiaID" =>  5, "valid_name" =>  6, "valid_authority" =>  7,
+  "kingdom"       =>  8, "phylum"     =>  9, "class"           => 10,
   "order"         => 11, "family"     => 12, "genus"           => 13,
-  "citation"     =>  14,);
+  "citation"      => 14,);
 
-# Datentypen der einzelnen Felder 
+# Data types of the fields
 my @TYPE = qw (INTEGER STRING STRING  STRING STRING
-INTEGER STRING STRING STRING STRING STRING 
+INTEGER STRING STRING STRING STRING STRING
  STRING STRING STRING STRING);
 
 # -------------------------------------------------
-# Parameter abfragen
+# Data/pattern for command line parameter
 # -------------------------------------------------
 my @BOOL = qw (true, false);
 my @FMT  = qw (DUMP CSV SQL);
-my $do     = 0; 
+my $do     = 0;
 my $param  = "";
 my $format = "DUMP";
 my $fuzzy  = "false";
-@_ = @ARGV; 
+my $HELP   = "Use $0 --help";
+
+@_ = @ARGV;
 
 # -------------------------------------------------
-# Parameter auslesen
+# Read CLI parameter
 # -------------------------------------------------
 my $mode = shift;
 while ( !$mode eq "" ) {
@@ -84,41 +105,41 @@ while ( !$mode eq "" ) {
     case "-c" { $do=4; $param = shift;  }
     case "-s" { $do=5; $param = shift;  }
     case ""   { shift; }
-    else {  die "Unbekannter Parameter $mode!\n" };
+    else {  die "Unkown command line option $mode!\n" };
   }
   $mode = shift;
 }
 # ------------------------------------------------------
-# Konsistenz-Check der Parameter
+# Consistency check for program settings
 # ------------------------------------------------------
-die "Fehlender Arbeitsmode !\n" if $do==0;
-die "Fehlender Parameter fuer $mode!\n" if ! $param;
-die "Falsches Format $format! Die Formatschluessel ".
-    join("|",@FMT)." sind erlaubt!\n"
+die "Request mode missed ! $HELP\n" if $do==0;
+die "mode parameter missed $mode! $HELP\n" if ! $param;
+die "Invalid format $format for output! The following keys ".
+    join("|",@FMT)." are valid!\n"
     if ! grep{ /$format/i } @FMT;
 
-die "Falsche Fuzzy-Option $fuzzy! Die Schluessel ".
-   join("|",@BOOL)." sind erlaubt!\n"
+die "Invalid search option $fuzzy! The keys  ".
+   join("|",@BOOL)." are valid!\n"
    if ! grep{ /$fuzzy/i } @BOOL;
 
 # ------------------------------------------------------
-# Programmlogik aufrufen
+# Program logic
 # ------------------------------------------------------
 switch ($do) {
- 
+
     # --search-id
     case 1 {  search_species_id($param,1); }
-    
+
     # --search-record
-    case 2 { 
+    case 2 {
       my $id = search_species_id($param,0);
       exit if ! $id;
       my $rec = get_record_by_id($id);
       exit if ! $rec;
       print_record($rec,1,1,"");
     }
-    
-    # --get-record 
+
+    # --get-record
     case 3 {
       my $rec = get_record_by_id($param);
       exit if ! $rec;
@@ -128,8 +149,8 @@ switch ($do) {
     case 4 {
       get_children_by_id($param);
     }
-    
-    # --search-fuzzy experimentell 
+
+    # --search-fuzzy experimentell
     #   offset funktioniert nicht!
     case 5 {
       search_fuzzy($param, $fuzzy);
@@ -137,9 +158,9 @@ switch ($do) {
 }
 
 # ==================================================
-# Deklaration Service-Routinen
+# Service routines
 # ==================================================
-# Untergordnete Taxa eines bestimmten Taxon suchen 
+# Get subsequent taxa of a specific taxon
 # -------------------------------------------------
 sub get_children_by_id() {
     my $sid = $_[0];
@@ -148,7 +169,7 @@ sub get_children_by_id() {
     while ($num > 0) {
 	my $recs_ref = get_block_children_by_id($sid,$ offs);
         if ($recs_ref) {
-          my @recs = @$recs_ref; 
+          my @recs = @$recs_ref;
           $num  = @recs;
           foreach my $rec (@recs) {
               $total++;
@@ -158,12 +179,12 @@ sub get_children_by_id() {
         } else { $num=0; }
         #  print "---- $num $offs $total -----\n";
     }
-    print "EOF\n" if $format eq "DUMP"; 
-    print ";\n" if $format eq "SQL" && $total >0; 
+    print "EOF\n" if $format eq "DUMP";
+    print ";\n" if $format eq "SQL" && $total >0;
 }
 
 # -------------------------------------------------
-# Taxa unscharf suchen
+# Request for taxa pattern search
 # -------------------------------------------------
 sub search_fuzzy() {
     my $name  = $_[0];
@@ -185,12 +206,12 @@ sub search_fuzzy() {
         }
         # print "---- $num $offs $total -----\n";
     }
-    print "EOF\n" if $format eq "DUMP"; 
-    print ";\n" if $format eq "SQL" && $total > 0; 
+    print "EOF\n" if $format eq "DUMP";
+    print ";\n" if $format eq "SQL" && $total > 0;
 }
 
 # ------------------------------------------------------------
-# Art in WORMS suchen 
+# Request to WORMS for a specific taxon by name
 # ------------------------------------------------------------
 sub search_species_id() {
    my $name  = $_[0];
@@ -208,7 +229,7 @@ sub search_species_id() {
 
 
 # ------------------------------------------------------------
-# Auslesen des WORMS Records bei gegebenen AphiaID
+# Request to WORMS for a specific taxon by AphiaID
 # ------------------------------------------------------------
 sub get_record_by_id() {
     my $id  = $_[0];
@@ -217,12 +238,12 @@ sub get_record_by_id() {
 
     my $result = $response->result;
     print "DGB BEGIN:\n",Dumper($result),"EOF\n" if $DEBUG;
-    
+
     return $result;
 }
 
 # -------------------------------------------------
-# DONT WORK
+# @TODO THIS REQUEST DONT WORK
 # -------------------------------------------------
 sub get_block_children_by_id() {
     my $id   = $_[0];
@@ -232,7 +253,7 @@ sub get_block_children_by_id() {
                                => SOAP::Data->name("offset")  -> value($offs),
                                => SOAP::Data->name("marine_only") -> value("false")
                               ) ;
-    my $result = $response->result;    
+    my $result = $response->result;
     print "DGB BEGIN:\n",Dumper($result),"EOF\n" if $DEBUG;
 
     return $result;
@@ -251,7 +272,7 @@ sub search_block_fuzzy() {
                                => SOAP::Data->name("offset") -> value($offs),
                                => SOAP::Data->name("marine_only") -> value("false"),
                                => SOAP::Data->name("like")  ->  value($fuzzy)) ;
-    my $result = $response->result;    
+    my $result = $response->result;
     print "DGB BEGIN:\n",Dumper($result),"EOF\n" if $DEBUG;
 
     return $result;
@@ -259,24 +280,28 @@ sub search_block_fuzzy() {
 
 
 # -------------------------------------------------
-# WORMS Daten ausgeben 
+# Output service routine record DUMP, CSV and SQL
+# @TODO this is a mess rewrite
 # -------------------------------------------------
 sub print_record() {
     my $record = shift;
     my $first  = shift;
     my $last   = shift;
     my $spc    = shift;
+    # asign header section 
     my @head = ();
-
     @head = @ORDER_TAB if $format eq "SQL";
     @head = @ORDER_TAB if $format eq "CSV";
     @head = @ORDER_CSV if $format eq "DUMP";
-    
+
     my $num_fields = $#head;
     my @data = (); my @quote = ();
-    for ( my $i = 0; $i <= $num_fields; $i++ ) {
+    # NULL and quotation
+    for my $i (0..$num_fields) {
+      # Handle empty fields  
       $data[$i] = "NULL" if $format eq "SQL";
       $data[$i] = "NA"   if $format eq "CSV" || $format eq "DUMP";
+      # Apply quotation
       if ($TYPE[$i] eq "STRING") {
         $quote[$i] = "'";
       } else { $quote[$i] = ""; }
@@ -287,6 +312,7 @@ sub print_record() {
 
     # return if $record{status} =~ "deleted";
     # print %rechash, "\n";
+    
     print "\n", $spc, "WORMS ID $id \n" if $format eq "DUMP";
     if ($first && $format eq "SQL") {
       print "INSERT INTO WORMS_TABLE\n(";
@@ -301,18 +327,22 @@ sub print_record() {
 
     foreach my $k (keys %rechash)  {
         my $value =  $rechash{$k};
-        $value =~ s/'/\\'/g; # Franzoesische Authoren...
+        $value =~ s/'/\\'/g; # French quotes author
         my $i = $ORDER_HASH{$k};
+        if (! defined($i)) {
+            print "NO MATCH ",$k,"\n" if $DEBUG;
+            next;
+        }
         if ($i>=0) {
           # $data[i] = sprintf("%16s %d %8s %16s %s%s%s",
-          #    $k, $i, $TYPE[$i],$head[$i],$quote[$i], $value, $quote[$i]);
-          $data[$i] = sprintf("%s%8s %16s %s%s%s",
+          #    $k, $i, $TYPE[$i],$head[$i],$quote[$i], $value, $quote[$i])
+           $data[$i] = sprintf("%s%8s %16s %s%s%s",
              $spc, $TYPE[$i],$head[$i],$quote[$i], $value, $quote[$i])
           if $format eq "DUMP";
-  
+
           $data[$i] = $quote[$i].$value.$quote[$i]
           if $format eq "SQL";
-  
+
           $data[$i] = $quote[$i].$value.$quote[$i]
           if $format eq "CSV";
         }
@@ -325,7 +355,7 @@ sub print_record() {
 }
 
 # -------------------------------------------------
-# WORMS Daten ausgeben 
+# WORMS dump Data
 # -------------------------------------------------
 sub print_record_def() {
     my $record = shift;
@@ -358,16 +388,34 @@ sub print_record_def() {
 }
 
 # ==================================================
-# Hilfetext
+# Help text
 # ==================================================
 =pod
+
 =head1 NAME
 
- web-worms - WORMS Harvester fuer dynamische Abfragen 
+ web-worms - WORMS Harvester Q&D to find taxa
 
 =head1 SYNOPSIS
 
-web-worms MODE PARAM [OPTIONEN..]
+worms-harvester.pl MODE PARAM [OPTIONS..]
+
+worms-harvester.pl -i Abra
+
+worms-harvester.pl -n Abra
+
+
+==head1 DESCRIPTION
+
+ The tool is Q&D solution to read and search datasets from the
+ taxonomic database WoRMS.  WoRMS is a register for marine
+ species. The aim of a World Register of Marine Species (WoRMS) is to
+ provide an authoritative and comprehensive list of names of marine
+ organisms, including information on synonymy. While highest priority
+ goes to valid names, other names in use are included so that this
+ register can serve as a guide to interpret taxonomic literature.
+
+ http://www.marinespecies.org/
 
 =head1 MODI
 
@@ -375,24 +423,23 @@ web-worms MODE PARAM [OPTIONEN..]
 
 =item -i --search-id NAME
 
-  nach einer AphiaID suchen
+  Find taxon name by AphiaID
 
-=item -n --search-record NAME  
+=item -n --search-record NAME
 
-  nach einem WoRMS-Record suchen
+  Find taxon by name
 
-=item -r --get-record ID 
+=item -r --get-record ID
 
-   Record fuer AphiaID suchen
+   Get the record for a specific AphiaID
 
-=item -s --search-fuzzy MUSTER
+=item -s --search-fuzzy PATTERN
+    
+   Pattern search with max 50 results (EXPERIMENTAL)
 
-   Unschrafe Suche nach einem Namen EXPERIMENTELL
-   Max. 50 Ergebnisse werden ausgegeben.
+=item -c --get-children ID
 
-=item -c --get-children ID    
-
-  Records unterhalb der AphiaID suchen
+  Get su sequent taxa fo a specific AphiaID
 
 =back
 
@@ -400,18 +447,17 @@ web-worms MODE PARAM [OPTIONEN..]
 
 =over 4
 
-=item NAME 
+=item NAME
 
- ein wissenschaftlicher Name
+ a scientific name (lat.)
 
-=item MUSTER 
+=item PATTERN
 
- ein Suchmuster z.B. Abra%
+ a search pattern like Abra%
 
+=item ID
 
-=item ID    
-
- ein Zahlenschluessel in WORMS AphiaID genannt
+ a numeric key in WORMS clled AphiaID
 
 =back
 
@@ -421,19 +467,22 @@ web-worms MODE PARAM [OPTIONEN..]
 
 =item -f --format dump|csv|sql
 
-  Ausgabeformat
+  Output format
 
 =back
 
-=head1 Ausgabeformate
+=head1 Output formats
 
-Je nach Aufgabe werden unterschiedliche Ausgaben erzeugt
+The tool gives you different output structures for each
+operation mode (--get-record, --search-record, etc...).
 
 =over 4
 
-=item --search-id 
+=item --search-id
 
-  Die  Schluesselnummer der Art (AphiaID) 
+  You get back the key of the (AphiaID)
+
+=back
 
 =over 8
 
@@ -451,33 +500,53 @@ Je nach Aufgabe werden unterschiedliche Ausgaben erzeugt
 
 =back
 
-=item --search-record, --get-record 
+=over 4
 
-  Der Datensatz einer Art
+=item --search-record, --get-record
+
+  Record for species datasets
+
+=back
 
 =over 8
 
-=item FORMAT DUMP (Standardeinstellung) 
+=item FORMAT DUMP (DEFAULT CONFIG)
 
 WORMS ID 550560
+
   INTEGER APHIA.ID       550560
+
   STRING  NAME           'Pontoporeia affinis'
+
   STRING  AUTHOR         'Ekman, 1913'
+
   STRING  STATUS         'unaccepted'
+
   STRING  CITE           'Lowry, J. (2012). Pontoporeia ..'
+
   INTEGER VALID.APHIA.ID 103078
+
   STRING  VALID.NAME     'Pontoporeia affinis'
+
   STRING  VALID.AUTHOR   'Lindstroem, 1855'
+
   STRING  KINGDOM        'Animalia'
+
   STRING  PHYLUM         'Arthropoda'
+
   STRING  ORDER          'Amphipoda'
+
   STRING  CLASS          'Malacostraca'
+
   STRING  RANK           'Species'
+
   STRING  FAMILY         'Pontoporeiidae'
+
   STRING  GENUS          'Pontoporeia'
+
  EOF
 
-=item FORMAT SQL 
+=item FORMAT SQL
 
  INSERT INTO WORMS_TABLE
 
@@ -497,18 +566,22 @@ WORMS ID 550560
 
 =item FORMAT CSV
 
-ZEILE1:APHIA_ID,NAME,AUTHOR,STATUS,CITE RANK,VALID_APHIA_ID,VALID_NAME,VALID_AUTHOR,RNK_KINGDOM,RNK_PHYLUM,RNK_CLASS,RNK_ORDER,RNK_FAMILY RNK_GENUS
-ZEILE2:550560,'Pontoporeia affinis','Ekman, 1913','unaccepted','Lowry, J. (2012). Pontoporeia ..','Species',103078,'Pontoporeia affinis',   'Lindstroem, 1855','Animalia','Arthropoda','Amphipoda','Malacostraca','Pontoporeiidae','Pontoporeia' 
+LINE1:APHIA_ID,NAME,AUTHOR,STATUS,CITE RANK,VALID_APHIA_ID,VALID_NAME,VALID_AUTHOR,RNK_KINGDOM,RNK_PHYLUM,RNK_CLASS,RNK_ORDER,RNK_FAMILY RNK_GENUS
+LINE2:550560,'Pontoporeia affinis','Ekman, 1913','unaccepted','Lowry, J. (2012). Pontoporeia ..','Species',103078,'Pontoporeia affinis',   'Lindstroem, 1855','Animalia','Arthropoda','Amphipoda','Malacostraca','Pontoporeiidae','Pontoporeia'
 
 =back
 
-=item --search-fuzzy, --get-children ID    
+=over 4
 
-  Eine Liste von Datensaetzen mehrer Arten
+=item --search-fuzzy, --get-children ID
+
+  A list of secord for pattern search or species groups
+
+=back
 
 =over 8
 
-=item FORMAT DUMP (Standardeinstellung)
+=item FORMAT DUMP (Default config)
 
 WORMS.CHILDREN ID XXXXX, WORMS.SEARCH.FUZZY PATTERN XXXXX
 
@@ -543,10 +616,10 @@ WORMS.CHILDREN ID XXXXX, WORMS.SEARCH.FUZZY PATTERN XXXXX
 
 =item FORMAT CSV
 
- ZEILE1: APHIA_ID,NAME,AUTHOR,STATUS,CITE RANK,VALID_APHIA_ID,VALID_NAME,VALID_AUTHOR,RNK_KINGDOM,RNK_PHYLUM,RNK_CLASS,RNK_ORDER,RNK_FAMILY RNK_GENUS
- ZEILE2: 50560,'Pontoporeia affinis','Ekman, 1913','unaccepted','Lowry, J. (2012). Pontoporeia ..','Species',103078,'Pontoporeia affinis',   'Lindstroem, 1855','Animalia','Arthropoda','Amphipoda','Malacostraca','Pontoporeiidae','Pontoporeia' 
- ZEILE3: 550560,'Pontoporeia ...',...,...
- ZEILE4: ...
+ LINE1: APHIA_ID,NAME,AUTHOR,STATUS,CITE RANK,VALID_APHIA_ID,VALID_NAME,VALID_AUTHOR,RNK_KINGDOM,RNK_PHYLUM,RNK_CLASS,RNK_ORDER,RNK_FAMILY RNK_GENUS
+ LINE22: 50560,'Pontoporeia affinis','Ekman, 1913','unaccepted','Lowry, J. (2012). Pontoporeia ..','Species',103078,'Pontoporeia affinis',   'Lindstroem, 1855','Animalia','Arthropoda','Amphipoda','Malacostraca','Pontoporeiidae','Pontoporeia'
+ LINE3: 550560,'Pontoporeia ...',...,...
+ LINE4: ...
 
 =back
 
