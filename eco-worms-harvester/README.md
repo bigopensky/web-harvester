@@ -1,4 +1,4 @@
-# Worms Harvester
+# WoRMS Harvester
 
 The tool **worms-harvester** is Q&D solution to read and search
 datasets from the taxonomic database
