@@ -2,8 +2,8 @@
 
 The tool **worms-harvester** is Q&D solution to read and search
 datasets from the taxonomic database
-[WoRMS](http://www.marinespecies.org/) WoRMS is a register for marine
-species. The aim of a World Register of Marine Species (WoRMS) is to
+[WoRMS](http://www.marinespecies.org/).
+The aim of a World Register of Marine Species (WoRMS) is to
 provide an authoritative and comprehensive list of names of marine
 organisms, including information on synonymy. While highest priority
 goes to valid names, other names in use are included so that this
