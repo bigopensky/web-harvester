@@ -20,8 +20,8 @@ The tool worms-harvester.pl is a pure perl program and depends on the modules
 for the embedded help context.
 
 Please follow the instructions of [Comprehensive Perl Archive
-Network](http://www.cpan.org/modules/INSTALL.html)To install the listed modules
-and the [Download and install Perl](https://www.perl.org/get.html) fot the runtime environment.
+Network](http://www.cpan.org/modules/INSTALL.html) to install the listed modules
+and the [Download and install Perl](https://www.perl.org/get.html) for the runtime environment.
 
 ## Functionality 
 
@@ -31,8 +31,8 @@ worms-harvester.pl MODE PARAM [OPTIONS..]
 
 and a resulting data context written to the standard output channel.
 There are 5 different modes, to search taxa, request ID's and list
-a susequent information context to query and build a hierachical
-taxonimic species context:
+a susequent information context, to query and build a hierachical
+taxonomic species context:
 
 * -i --search-id NAME
   Find taxon name by AphiaID
