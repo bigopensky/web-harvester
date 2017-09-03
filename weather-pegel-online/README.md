@@ -1,4 +1,4 @@
-# Read data fom Pegel Online in Germany
+# Read data from Pegel Online in Germany
 
 ## Usage 
 ```
