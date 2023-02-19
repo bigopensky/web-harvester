@@ -52,7 +52,7 @@ taxonomic species context:
 Due to it's Q&D role the adustment of the hierarchie is made
 on the distinct taxonomic levels:
 
-KINDOM, PHYLUM, ORDER, CLASS, FAMILY, GENUS, SPECIES
+KINGDOM, PHYLUM, ORDER, CLASS, FAMILY, GENUS, SPECIES
 
 (to determin the taxonomic distictness
 [1](http://www.fc.up.pt/pessoas/amsantos/bea/clarwarw1999.pdf) for
